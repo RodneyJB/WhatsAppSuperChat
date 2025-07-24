@@ -1,3 +1,13 @@
 https://whatsappsuperchat.onrender.com/qr
+// to get qr code to conect to the whats app channel
+
+
 
 https://whatsappsuperchat.onrender.com/test-send
+// sends a test message to the whats app group
+
+
+
+Temp
+https://whatsappsuperchat.onrender.com/debug-webhook
+https://whatsappsuperchat.onrender.com/superchat

@@ -1,5 +1,5 @@
 import express from 'express';
-import { initializeWhatsApp, sendToGroup, isSocketOpen, getCurrentQRCode } from './whatsapp.js';
+import { initializeWhatsApp, sendToGroup, isSocketOpen, getCurrentQRCode, connectionStatus } from './whatsapp.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -13,16 +13,40 @@ async function startServer() {
     if (isInitializing) return;
     isInitializing = true;
     
-    try {
-        console.log('Initializing WhatsApp connection...');
-        whatsappSock = await initializeWhatsApp();
-        console.log('WhatsApp connection established successfully');
-    } catch (error) {
-        console.error('Failed to initialize WhatsApp:', error);
-        // Don't exit, let the server run and try to reconnect later
-    } finally {
-        isInitializing = false;
-    }
+    console.log('🔄 Starting persistent WhatsApp connection manager...');
+    
+    const attemptConnection = async () => {
+        try {
+            if (!whatsappSock || !isSocketOpen(whatsappSock)) {
+                console.log('🟡 Attempting WhatsApp connection...');
+                whatsappSock = await initializeWhatsApp();
+                console.log('✅ WhatsApp connection established');
+                return true;
+            }
+            return true;
+        } catch (error) {
+            console.error('❌ Connection attempt failed:', error.message);
+            return false;
+        }
+    };
+    
+    // Initial connection attempt
+    await attemptConnection();
+    
+    // Monitor and auto-reconnect every 5 minutes for months-long reliability
+    setInterval(async () => {
+        if (!isSocketOpen(whatsappSock)) {
+            console.log('💔 Connection lost - attempting reconnection...');
+            const success = await attemptConnection();
+            if (!success) {
+                console.log('🔄 Will retry in next interval...');
+            }
+        } else {
+            console.log('💓 Connection healthy');
+        }
+    }, 300000); // 5 minutes
+    
+    isInitializing = false;
 }
 
 // SuperChat webhook endpoint with comprehensive payload handling
@@ -167,7 +191,9 @@ app.get('/health', (req, res) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         whatsappConnected: isSocketOpen(whatsappSock),
-        hasQR: getCurrentQRCode() !== null
+        connectionStatus,
+        hasQR: getCurrentQRCode() !== null,
+        uptime: process.uptime()
     });
 });
 
@@ -225,14 +251,20 @@ app.all('/debug-webhook', (req, res) => {
 
 // Root endpoint
 app.get('/', (req, res) => {
+    const isConnected = whatsappSock && isSocketOpen(whatsappSock);
     res.status(200).json({
-        message: 'Superchat to WhatsApp server is running',
+        message: 'SuperChat to WhatsApp Bridge',
+        status: isConnected ? 'connected' : 'reconnecting',
         endpoints: {
             webhook: 'POST /superchat',
             qr: 'GET /qr (text format)',
             health: 'GET /health',
-            test: 'GET /test-send (send test message)'
-        }
+            test: 'GET /test-send (send test message)',
+            debug: 'ALL /debug-webhook (capture data)'
+        },
+        instructions: isConnected ? 
+            'Service ready - point SuperChat webhook to /superchat endpoint' :
+            'WhatsApp reconnecting - scan QR code at /qr endpoint if needed'
     });
 });
 

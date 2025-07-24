@@ -4,23 +4,18 @@ import fs from 'fs';
 
 const authDir = './auth';
 
-// Clear old auth data that might be causing 401 errors
-if (fs.existsSync(authDir)) {
-    try {
-        fs.rmSync(authDir, { recursive: true, force: true });
-        console.log('Cleared old auth directory');
-    } catch (error) {
-        console.log('Could not clear auth directory:', error.message);
-    }
-}
-
+// Create auth directory if it doesn't exist, but keep existing auth for persistence
 if (!fs.existsSync(authDir)) {
     fs.mkdirSync(authDir, { recursive: true });
-    console.log('Created fresh auth directory');
+    console.log('Created auth directory');
+} else {
+    console.log('Using existing auth directory for persistent connection');
 }
 
 let globalSock = null;
 let currentQRCode = null;
+let connectionStatus = 'disconnected';
+let heartbeatInterval = null;
 
 function isSocketOpen(sock) {
     if (!sock || !sock.ws) return false;
@@ -31,6 +26,30 @@ function getCurrentQRCode() {
     return currentQRCode;
 }
 
+// Heartbeat system to maintain connection
+function startHeartbeat(sock) {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    
+    heartbeatInterval = setInterval(async () => {
+        try {
+            if (isSocketOpen(sock)) {
+                // Send a lightweight query to keep connection alive
+                await sock.query({ tag: 'iq', attrs: { type: 'get', xmlns: 'jabber:iq:ping' } });
+                console.log('💓 Heartbeat - connection alive');
+                connectionStatus = 'connected';
+            } else {
+                console.log('💔 Heartbeat failed - connection lost');
+                connectionStatus = 'disconnected';
+                clearInterval(heartbeatInterval);
+            }
+        } catch (error) {
+            console.log('💔 Heartbeat error:', error.message);
+            connectionStatus = 'disconnected';
+            clearInterval(heartbeatInterval);
+        }
+    }, 300000); // Every 5 minutes
+}
+
 async function initializeWhatsApp() {
     return new Promise(async (resolve, reject) => {
         try {
@@ -39,10 +58,15 @@ async function initializeWhatsApp() {
             const sock = makeWASocket({
                 auth: state,
                 browser: ['Superchat Webhook', 'Chrome', '1.0.0'],
-                defaultQueryTimeoutMs: 60000,
-                connectTimeoutMs: 30000,
+                defaultQueryTimeoutMs: 120000, // Increased timeout
+                connectTimeoutMs: 60000, // Increased timeout 
                 generateHighQualityLinkPreview: false,
-                markOnlineOnConnect: false,
+                markOnlineOnConnect: true, // Keep connection alive
+                shouldIgnoreJid: jid => false,
+                shouldSyncFullHistory: false,
+                maxMsgRetryCount: 5,
+                transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 3000 },
+                getMessage: async (key) => undefined, // Handle missing messages
             });
 
             sock.ev.on('creds.update', saveCreds);
@@ -61,12 +85,24 @@ async function initializeWhatsApp() {
                     currentQRCode = null;
 
                     if (shouldReconnect) {
-                        console.log('Reconnecting...');
+                        console.log('🔄 Auto-reconnecting in 10 seconds...');
                         setTimeout(() => {
-                            initializeWhatsApp().then(resolve).catch(reject);
-                        }, 5000);
+                            initializeWhatsApp().then(sock => {
+                                globalSock = sock;
+                                console.log('✅ Reconnection successful');
+                            }).catch(err => {
+                                console.error('❌ Reconnection failed:', err.message);
+                                // Try again after 30 seconds
+                                setTimeout(() => initializeWhatsApp(), 30000);
+                            });
+                        }, 10000);
                     } else {
-                        console.log('Logged out. Restart and scan QR again.');
+                        console.log('❌ Logged out. Need new QR scan.');
+                        // Clear auth and require re-authentication
+                        if (fs.existsSync(authDir)) {
+                            fs.rmSync(authDir, { recursive: true, force: true });
+                        }
+                        fs.mkdirSync(authDir, { recursive: true });
                         reject(new Error('Logged out from WhatsApp'));
                     }
                 }
@@ -77,6 +113,11 @@ async function initializeWhatsApp() {
                     console.log('Ready to forward SuperChat messages to Weboat++ group');
                     globalSock = sock;
                     currentQRCode = null;
+                    connectionStatus = 'connected';
+                    
+                    // Start heartbeat to maintain connection
+                    startHeartbeat(sock);
+                    
                     resolve(sock);
                 }
             });
@@ -150,4 +191,5 @@ export {
     sendToGroup,
     isSocketOpen,
     getCurrentQRCode,
+    connectionStatus,
 };
