@@ -25,56 +25,80 @@ async function startServer() {
     }
 }
 
-// SuperChat webhook endpoint
+// SuperChat webhook endpoint with comprehensive payload handling
 app.post('/superchat', async (req, res) => {
     try {
-        console.log('Received Superchat webhook:', JSON.stringify(req.body, null, 2));
+        console.log('🔔 Received SuperChat webhook:', JSON.stringify(req.body, null, 2));
+        console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
 
-        const senderName = req.body?.message?.sender?.name || 'Unknown Sender';
-        const messageText = req.body?.message?.content?.text || 'No message content';
-        const attachments = req.body?.message?.attachments || [];
-        const conversationId = req.body?.message?.conversation?.id || 'unknown';
+        const webhookData = req.body;
+        let formattedMessage = '';
 
-        console.log('Extracted data:', {
-            senderName,
-            messageText,
-            attachments: attachments.length,
-            conversationId
-        });
+        // Handle different SuperChat webhook formats
+        if (webhookData.message) {
+            // SuperChat automation format: { "message": { "sender": { "name": "..." }, "content": { "text": "..." }, ... } }
+            const senderName = webhookData?.message?.sender?.name || 'Unknown Sender';
+            const messageText = webhookData?.message?.content?.text || 'No message content';
+            const attachments = webhookData?.message?.attachments || [];
+            const conversationId = webhookData?.message?.conversation?.id || 'unknown';
 
-        let formattedMessage = `📩 New Superchat message!\n👤 ${senderName}\n💬 "${messageText}"`;
+            formattedMessage = `📩 New SuperChat message!\n👤 ${senderName}\n💬 "${messageText}"`;
 
-        if (attachments.length > 0) {
-            const fileInfo = attachments.map(att => {
-                if (typeof att === 'string') return att;
-                if (att.url) return att.url;
-                if (att.name) return att.name;
-                return 'Unknown file';
-            }).join(', ');
-            formattedMessage += `\n📎 Files: ${fileInfo}`;
+            if (attachments.length > 0) {
+                const fileInfo = attachments.map(att => {
+                    if (typeof att === 'string') return att;
+                    if (att.url) return att.url;
+                    if (att.name) return att.name;
+                    return 'Unknown file';
+                }).join(', ');
+                formattedMessage += `\n📎 Files: ${fileInfo}`;
+            }
+
+            formattedMessage += `\n🔗 https://app.superchat.com/inbox/${conversationId}\n⚠️ Reply in SuperChat only.`;
+        } 
+        else if (webhookData.type === 'superchat' || webhookData.amount) {
+            // SuperChat donation format
+            const amount = webhookData.amount || 'Unknown';
+            const currency = webhookData.currency || '';
+            const authorName = webhookData.author?.name || webhookData.sender?.name || 'Anonymous';
+            const messageText = webhookData.message || webhookData.text || '';
+            
+            formattedMessage = `💰 SuperChat Donation: ${authorName} - ${amount}${currency}\n💬 "${messageText}"`;
+        }
+        else {
+            // Fallback - log everything and create basic message
+            console.log('🔍 Unknown webhook format - using fallback parser');
+            const possibleSender = webhookData.sender?.name || 
+                                  webhookData.author?.name || 
+                                  webhookData.user?.name || 
+                                  'Unknown Sender';
+            const possibleMessage = webhookData.message || 
+                                   webhookData.text || 
+                                   webhookData.content ||
+                                   JSON.stringify(webhookData);
+            
+            formattedMessage = `📝 SuperChat Notification\n👤 ${possibleSender}\n💬 ${possibleMessage}`;
         }
 
-        formattedMessage += `\n🔗 https://app.superchat.com/inbox/${conversationId}\n⚠️ Reply in Superchat only.`;
-
-        console.log('Formatted message:', formattedMessage);
+        console.log('📤 Formatted message for WhatsApp:', formattedMessage);
 
         // Reconnect if socket is dead
         if (!isSocketOpen(whatsappSock)) {
-            console.warn('WhatsApp socket closed — reinitializing...');
+            console.warn('⚠️ WhatsApp socket closed — reinitializing...');
             whatsappSock = await initializeWhatsApp();
         }
 
         const result = await sendToGroup(whatsappSock, 'Weboat++', formattedMessage);
         if (result.success) {
-            console.log('Message sent to WhatsApp successfully');
+            console.log('✅ Message sent to WhatsApp successfully');
             res.status(200).json({ status: 'success', message: 'Message forwarded to WhatsApp' });
         } else {
-            console.error('Failed to send message:', result.error);
+            console.error('❌ Failed to send message:', result.error);
             res.status(500).json({ status: 'error', message: 'Failed to send message', error: result.error });
         }
 
     } catch (error) {
-        console.error('Error processing webhook:', error);
+        console.error('❌ Error processing webhook:', error);
         res.status(500).json({ status: 'error', message: 'Internal server error', error: error.message });
     }
 });
@@ -175,6 +199,28 @@ app.get('/test-send', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     }
+});
+
+// Debug endpoint to capture webhook data (accepts any method)
+app.all('/debug-webhook', (req, res) => {
+    console.log('🔍 DEBUG WEBHOOK CAPTURED:');
+    console.log('📋 Method:', req.method);
+    console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('📋 Query:', JSON.stringify(req.query, null, 2));
+    console.log('📋 Body:', JSON.stringify(req.body, null, 2));
+    console.log('📋 Raw URL:', req.url);
+    console.log('📋 Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
+    console.log('==========================================');
+    
+    res.status(200).json({
+        status: 'captured',
+        method: req.method,
+        headers: req.headers,
+        query: req.query,
+        body: req.body,
+        timestamp: new Date().toISOString(),
+        message: 'Webhook data captured in server logs'
+    });
 });
 
 // Root endpoint
