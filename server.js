@@ -80,7 +80,7 @@ app.post('/superchat', async (req, res) => {
 });
 
 // QR Code endpoint for authentication (text only)
-app.get('/qr', (req, res) => {
+app.get('/qr', async (req, res) => {
     try {
         const qrCode = getCurrentQRCode();
         
@@ -88,7 +88,8 @@ app.get('/qr', (req, res) => {
             res.status(200).json({
                 qr: qrCode,
                 message: 'QR code available for scanning',
-                expires: '30 seconds'
+                expires: '30 seconds',
+                instructions: 'Copy this text, generate QR code image, and scan with WhatsApp'
             });
         } else {
             if (isSocketOpen(whatsappSock)) {
@@ -98,11 +99,32 @@ app.get('/qr', (req, res) => {
                     connected: true
                 });
             } else {
-                res.status(202).json({
-                    qr: null,
-                    message: 'No QR code available. WhatsApp may be initializing.',
-                    connected: false
-                });
+                // Try to reinitialize if no QR and not connected
+                console.log('No QR available, attempting to reinitialize WhatsApp...');
+                try {
+                    whatsappSock = await initializeWhatsApp();
+                    const newQrCode = getCurrentQRCode();
+                    if (newQrCode) {
+                        res.status(200).json({
+                            qr: newQrCode,
+                            message: 'QR code generated after reinitializing',
+                            expires: '30 seconds'
+                        });
+                    } else {
+                        res.status(202).json({
+                            qr: null,
+                            message: 'WhatsApp initializing. Please try again in a few seconds.',
+                            connected: false
+                        });
+                    }
+                } catch (initError) {
+                    console.error('Failed to reinitialize WhatsApp:', initError);
+                    res.status(500).json({
+                        qr: null,
+                        message: 'Failed to initialize WhatsApp connection',
+                        error: initError.message
+                    });
+                }
             }
         }
     } catch (error) {

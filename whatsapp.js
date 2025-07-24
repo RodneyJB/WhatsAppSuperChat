@@ -5,9 +5,20 @@ import makeWASocket, {
 import fs from 'fs';
 
 const authDir = './auth';
+
+// Clear old auth data that might be causing 401 errors
+if (fs.existsSync(authDir)) {
+    try {
+        fs.rmSync(authDir, { recursive: true, force: true });
+        console.log('Cleared old auth directory');
+    } catch (error) {
+        console.log('Could not clear auth directory:', error.message);
+    }
+}
+
 if (!fs.existsSync(authDir)) {
     fs.mkdirSync(authDir, { recursive: true });
-    console.log('Created auth directory');
+    console.log('Created fresh auth directory');
 }
 
 let globalSock = null;
@@ -29,9 +40,11 @@ async function initializeWhatsApp() {
 
             const sock = makeWASocket({
                 auth: state,
-                printQRInTerminal: false, // Don't print to terminal since we want to serve via API
-                browser: ['Superchat Webhook', 'Safari', '1.0.0'],
+                browser: ['Superchat Webhook', 'Chrome', '1.0.0'],
                 defaultQueryTimeoutMs: 60000,
+                connectTimeoutMs: 30000,
+                generateHighQualityLinkPreview: false,
+                markOnlineOnConnect: false,
             });
 
             sock.ev.on('creds.update', saveCreds);
@@ -40,10 +53,10 @@ async function initializeWhatsApp() {
                 const { connection, lastDisconnect, qr } = update;
 
                 if (qr) {
-                    console.log('\n--- WhatsApp QR Code Available ---');
-                    console.log('QR Code Text:', qr);
-                    console.log('Access via: GET /qr');
-                    console.log('--- End QR Code ---\n');
+                    console.log('\n--- WhatsApp QR Code Generated ---');
+                    console.log('QR Code available via API endpoint');
+                    console.log('Visit: /qr to get QR code text');
+                    console.log('--- QR Code Ready ---\n');
                     currentQRCode = qr;
                 }
 
