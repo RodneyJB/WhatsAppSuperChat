@@ -1,7 +1,5 @@
-import makeWASocket, {
-    DisconnectReason,
-    useMultiFileAuthState,
-} from '@whiskeysockets/baileys';
+import pkg from '@whiskeysockets/baileys';
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = pkg;
 import fs from 'fs';
 
 const authDir = './auth';
