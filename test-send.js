@@ -1,15 +1,34 @@
-import { initializeWhatsApp, sendToGroup } from './whatsapp.js';
+// Test SuperChat webhook payload to verify parsing
+import fetch from 'node-fetch';
 
-(async () => {
+const testPayload = {
+  "message": {
+    "sender": { "name": "John Doe" },
+    "content": { "text": "Hello from SuperChat!" },
+    "attachments": [ "https://example.com/file.jpg" ],
+    "conversation": { "id": "conv_12345" }
+  }
+};
+
+async function testWebhook() {
     try {
-        console.log('🧪 Testing WhatsApp message sending...');
-        const sock = await initializeWhatsApp();
-        const message = '🧪 Test message from manual test file';
-        const result = await sendToGroup(sock, 'Weboat++', message);
-        console.log('Send result:', result);
-        process.exit(0);
+        console.log('Testing SuperChat webhook payload...');
+        console.log('Payload:', JSON.stringify(testPayload, null, 2));
+        
+        const response = await fetch('https://whatsappsuperchat.onrender.com/superchat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(testPayload)
+        });
+        
+        const result = await response.json();
+        console.log('Response:', result);
+        
     } catch (error) {
         console.error('Test failed:', error);
-        process.exit(1);
     }
-})();
+}
+
+testWebhook();

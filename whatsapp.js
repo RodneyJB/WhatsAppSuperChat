@@ -51,10 +51,8 @@ async function initializeWhatsApp() {
                 const { connection, lastDisconnect, qr } = update;
 
                 if (qr) {
-                    console.log('\n=== WhatsApp QR Code ===');
-                    console.log('QR CODE TEXT:', qr);
-                    console.log('=== Copy this text above and generate QR image ===\n');
                     currentQRCode = qr;
+                    console.log('🔗 QR code generated - available at /qr endpoint');
                 }
 
                 if (connection === 'close') {
