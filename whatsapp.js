@@ -99,21 +99,39 @@ async function sendToGroup(sock, groupName, message) {
 
         console.log(`Looking for group: "${groupName}"`);
         const chats = await sock.groupFetchAllParticipating();
+        
+        console.log(`Total groups found: ${Object.keys(chats).length}`);
+        
+        // Log all groups for debugging
+        console.log('All available groups:');
+        for (const groupId in chats) {
+            console.log(`- "${chats[groupId].subject}" (ID: ${groupId})`);
+        }
 
         let targetGroupId = null;
         for (const groupId in chats) {
+            // Try exact match first
             if (chats[groupId].subject === groupName) {
                 targetGroupId = groupId;
-                console.log(`Found group "${groupName}" with ID: ${groupId}`);
+                console.log(`✅ Found exact match: "${groupName}" with ID: ${groupId}`);
+                break;
+            }
+            // Try case-insensitive match
+            if (chats[groupId].subject.toLowerCase() === groupName.toLowerCase()) {
+                targetGroupId = groupId;
+                console.log(`✅ Found case-insensitive match: "${chats[groupId].subject}" with ID: ${groupId}`);
+                break;
+            }
+            // Try partial match
+            if (chats[groupId].subject.includes(groupName) || groupName.includes(chats[groupId].subject)) {
+                targetGroupId = groupId;
+                console.log(`✅ Found partial match: "${chats[groupId].subject}" with ID: ${groupId}`);
                 break;
             }
         }
 
         if (!targetGroupId) {
-            console.error(`Group "${groupName}" not found. Available groups:`);
-            for (const groupId in chats) {
-                console.log(`- ${chats[groupId].subject} (${groupId})`);
-            }
+            console.error(`❌ Group "${groupName}" not found in any of the ${Object.keys(chats).length} groups`);
             return { success: false, error: `Group "${groupName}" not found` };
         }
 

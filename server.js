@@ -147,6 +147,36 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Test endpoint to send a message and debug groups
+app.get('/test-send', async (req, res) => {
+    try {
+        console.log('🧪 Test endpoint called');
+        
+        if (!whatsappSock || !isSocketOpen(whatsappSock)) {
+            console.log('⚠️ WhatsApp socket not available, attempting to reconnect...');
+            whatsappSock = await initializeWhatsApp();
+        }
+        
+        const testMessage = '🧪 Test message from /test-send endpoint - ' + new Date().toISOString();
+        const result = await sendToGroup(whatsappSock, 'Weboat++', testMessage);
+        
+        res.status(200).json({
+            status: 'test_completed',
+            message: testMessage,
+            result: result,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ Test endpoint error:', error);
+        res.status(500).json({
+            status: 'error',
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
     res.status(200).json({
@@ -154,7 +184,8 @@ app.get('/', (req, res) => {
         endpoints: {
             webhook: 'POST /superchat',
             qr: 'GET /qr (text format)',
-            health: 'GET /health'
+            health: 'GET /health',
+            test: 'GET /test-send (send test message)'
         }
     });
 });
