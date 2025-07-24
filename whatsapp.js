@@ -57,16 +57,19 @@ async function initializeWhatsApp() {
 
             const sock = makeWASocket({
                 auth: state,
-                browser: ['Superchat Webhook', 'Chrome', '1.0.0'],
-                defaultQueryTimeoutMs: 120000, // Increased timeout
-                connectTimeoutMs: 60000, // Increased timeout 
+                browser: ['SuperChat-Bridge', 'Ubuntu', '22.04.0'], // Unique browser ID
+                defaultQueryTimeoutMs: 120000,
+                connectTimeoutMs: 60000,
                 generateHighQualityLinkPreview: false,
-                markOnlineOnConnect: true, // Keep connection alive
+                markOnlineOnConnect: false, // Prevent conflicts
                 shouldIgnoreJid: jid => false,
                 shouldSyncFullHistory: false,
-                maxMsgRetryCount: 5,
-                transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 3000 },
-                getMessage: async (key) => undefined, // Handle missing messages
+                maxMsgRetryCount: 3,
+                transactionOpts: { maxCommitRetries: 5, delayBetweenTriesMs: 2000 },
+                getMessage: async (key) => undefined,
+                syncFullHistory: false,
+                fireInitQueries: true,
+                emitOwnEvents: false, // Prevent duplicate events
             });
 
             sock.ev.on('creds.update', saveCreds);
@@ -81,28 +84,36 @@ async function initializeWhatsApp() {
 
                 if (connection === 'close') {
                     const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-                    console.log('Connection closed:', lastDisconnect?.error);
+                    const errorCode = lastDisconnect?.error?.output?.statusCode;
+                    
+                    console.log('Connection closed:', lastDisconnect?.error?.message || 'Unknown error');
+                    console.log('Error code:', errorCode);
                     currentQRCode = null;
+                    connectionStatus = 'disconnected';
 
-                    if (shouldReconnect) {
-                        console.log('🔄 Auto-reconnecting in 10 seconds...');
+                    // Handle specific error types
+                    if (errorCode === 440) { // Stream conflict
+                        console.log('🔄 Conflict detected - waiting 30 seconds before reconnect...');
+                        setTimeout(() => {
+                            initializeWhatsApp().then(sock => {
+                                globalSock = sock;
+                                console.log('✅ Reconnection successful after conflict resolution');
+                            }).catch(err => {
+                                console.error('❌ Reconnection failed:', err.message);
+                            });
+                        }, 30000); // Wait longer for conflicts
+                    } else if (shouldReconnect) {
+                        console.log('🔄 Auto-reconnecting in 15 seconds...');
                         setTimeout(() => {
                             initializeWhatsApp().then(sock => {
                                 globalSock = sock;
                                 console.log('✅ Reconnection successful');
                             }).catch(err => {
                                 console.error('❌ Reconnection failed:', err.message);
-                                // Try again after 30 seconds
-                                setTimeout(() => initializeWhatsApp(), 30000);
                             });
-                        }, 10000);
+                        }, 15000);
                     } else {
                         console.log('❌ Logged out. Need new QR scan.');
-                        // Clear auth and require re-authentication
-                        if (fs.existsSync(authDir)) {
-                            fs.rmSync(authDir, { recursive: true, force: true });
-                        }
-                        fs.mkdirSync(authDir, { recursive: true });
                         reject(new Error('Logged out from WhatsApp'));
                     }
                 }
