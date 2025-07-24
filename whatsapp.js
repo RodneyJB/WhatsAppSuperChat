@@ -53,10 +53,9 @@ async function initializeWhatsApp() {
                 const { connection, lastDisconnect, qr } = update;
 
                 if (qr) {
-                    console.log('\n--- WhatsApp QR Code Generated ---');
-                    console.log('QR Code available via API endpoint');
-                    console.log('Visit: /qr to get QR code text');
-                    console.log('--- QR Code Ready ---\n');
+                    console.log('\n=== WhatsApp QR Code ===');
+                    console.log('QR CODE TEXT:', qr);
+                    console.log('=== Copy this text above and generate QR image ===\n');
                     currentQRCode = qr;
                 }
 
@@ -79,6 +78,7 @@ async function initializeWhatsApp() {
                 if (connection === 'open') {
                     console.log('✅ WhatsApp connected!');
                     console.log('Phone:', sock.user?.id);
+                    console.log('Ready to forward SuperChat messages to Weboat++ group');
                     globalSock = sock;
                     currentQRCode = null;
                     resolve(sock);
