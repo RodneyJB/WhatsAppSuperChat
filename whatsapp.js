@@ -1,10 +1,8 @@
-const {
-    default: makeWASocket,
+import makeWASocket, {
     DisconnectReason,
     useMultiFileAuthState,
-} = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
-const fs = require('fs');
+} from '@whiskeysockets/baileys';
+import fs from 'fs';
 
 const authDir = './auth';
 if (!fs.existsSync(authDir)) {
@@ -13,9 +11,15 @@ if (!fs.existsSync(authDir)) {
 }
 
 let globalSock = null;
+let currentQRCode = null;
 
 function isSocketOpen(sock) {
-    return sock?.ws?.readyState === 1;
+    if (!sock || !sock.ws) return false;
+    return sock.ws.readyState === 1;
+}
+
+function getCurrentQRCode() {
+    return currentQRCode;
 }
 
 async function initializeWhatsApp() {
@@ -25,7 +29,7 @@ async function initializeWhatsApp() {
 
             const sock = makeWASocket({
                 auth: state,
-                printQRInTerminal: true,
+                printQRInTerminal: false, // Don't print to terminal since we want to serve via API
                 browser: ['Superchat Webhook', 'Safari', '1.0.0'],
                 defaultQueryTimeoutMs: 60000,
             });
@@ -36,16 +40,17 @@ async function initializeWhatsApp() {
                 const { connection, lastDisconnect, qr } = update;
 
                 if (qr) {
-                    console.log('\n--- WhatsApp QR Code ---');
-                    qrcode.generate(qr, { small: true });
-                    console.log('Scan this string if needed:');
-                    console.log(qr);
+                    console.log('\n--- WhatsApp QR Code Available ---');
+                    console.log('QR Code Text:', qr);
+                    console.log('Access via: GET /qr');
                     console.log('--- End QR Code ---\n');
+                    currentQRCode = qr;
                 }
 
                 if (connection === 'close') {
                     const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
                     console.log('Connection closed:', lastDisconnect?.error);
+                    currentQRCode = null;
 
                     if (shouldReconnect) {
                         console.log('Reconnecting...');
@@ -62,14 +67,10 @@ async function initializeWhatsApp() {
                     console.log('✅ WhatsApp connected!');
                     console.log('Phone:', sock.user?.id);
                     globalSock = sock;
+                    currentQRCode = null;
                     resolve(sock);
                 }
             });
-
-            // Optional for debugging
-            // sock.ev.on('messages.upsert', m => {
-            //     console.log('Received message update:', JSON.stringify(m, null, 2));
-            // });
 
         } catch (error) {
             console.error('Error initializing WhatsApp:', error);
@@ -117,8 +118,9 @@ async function sendToGroup(sock, groupName, message) {
     }
 }
 
-module.exports = {
+export {
     initializeWhatsApp,
     sendToGroup,
     isSocketOpen,
+    getCurrentQRCode,
 };

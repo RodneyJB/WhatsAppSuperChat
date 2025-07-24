@@ -1,5 +1,5 @@
-const express = require('express');
-const { initializeWhatsApp, sendToGroup, isSocketOpen } = require('./whatsapp');
+import express from 'express';
+import { initializeWhatsApp, sendToGroup, isSocketOpen, getCurrentQRCode } from './whatsapp.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -7,18 +7,25 @@ const PORT = process.env.PORT || 5000;
 app.use(express.json());
 
 let whatsappSock = null;
+let isInitializing = false;
 
 async function startServer() {
+    if (isInitializing) return;
+    isInitializing = true;
+    
     try {
         console.log('Initializing WhatsApp connection...');
         whatsappSock = await initializeWhatsApp();
         console.log('WhatsApp connection established successfully');
     } catch (error) {
         console.error('Failed to initialize WhatsApp:', error);
-        process.exit(1);
+        // Don't exit, let the server run and try to reconnect later
+    } finally {
+        isInitializing = false;
     }
 }
 
+// SuperChat webhook endpoint
 app.post('/superchat', async (req, res) => {
     try {
         console.log('Received Superchat webhook:', JSON.stringify(req.body, null, 2));
@@ -72,19 +79,59 @@ app.post('/superchat', async (req, res) => {
     }
 });
 
+// QR Code endpoint for authentication (text only)
+app.get('/qr', (req, res) => {
+    try {
+        const qrCode = getCurrentQRCode();
+        
+        if (qrCode) {
+            res.status(200).json({
+                qr: qrCode,
+                message: 'QR code available for scanning',
+                expires: '30 seconds'
+            });
+        } else {
+            if (isSocketOpen(whatsappSock)) {
+                res.status(200).json({
+                    qr: null,
+                    message: 'WhatsApp already connected',
+                    connected: true
+                });
+            } else {
+                res.status(202).json({
+                    qr: null,
+                    message: 'No QR code available. WhatsApp may be initializing.',
+                    connected: false
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error getting QR code:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to get QR code',
+            error: error.message
+        });
+    }
+});
+
+// Health check endpoint
 app.get('/health', (req, res) => {
     res.status(200).json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        whatsappConnected: isSocketOpen(whatsappSock)
+        whatsappConnected: isSocketOpen(whatsappSock),
+        hasQR: getCurrentQRCode() !== null
     });
 });
 
+// Root endpoint
 app.get('/', (req, res) => {
     res.status(200).json({
         message: 'Superchat to WhatsApp server is running',
         endpoints: {
             webhook: 'POST /superchat',
+            qr: 'GET /qr (text format)',
             health: 'GET /health'
         }
     });
@@ -93,6 +140,7 @@ app.get('/', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Webhook endpoint: http://0.0.0.0:${PORT}/superchat`);
+    console.log(`QR code endpoint: http://0.0.0.0:${PORT}/qr`);
     console.log(`Health check: http://0.0.0.0:${PORT}/health`);
     startServer();
 });
