@@ -1,5 +1,5 @@
 const express = require('express');
-const WhatsAppService = require('./whatsapp.js');
+const PersistentWhatsAppService = require('./db-whatsapp.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Initialize WhatsApp service
-const whatsappService = new WhatsAppService();
+// Initialize persistent WhatsApp service
+const whatsappService = new PersistentWhatsAppService();
 
 // Global message storage (in production, use a database)
 const messages = [];
@@ -38,7 +38,7 @@ const updateMessageStatus = (id, status) => {
 };
 
 // Initialize WhatsApp service
-console.log('Initializing WhatsApp service...');
+console.log('Initializing persistent WhatsApp service...');
 whatsappService.initialize().catch(error => {
   console.error('Failed to initialize WhatsApp service:', error);
 });
@@ -113,19 +113,87 @@ app.post('/superchat', async (req, res) => {
   }
 });
 
-// QR Code endpoint
+// QR Code endpoint with enhanced information
 app.get('/qr', async (req, res) => {
   try {
     const qrCode = await whatsappService.getQRCode();
-    const isConnected = whatsappService.isClientReady();
+    const connectionInfo = await whatsappService.getConnectionInfo();
     
-    if (qrCode) {
-      // Return HTML page with QR code
+    if (connectionInfo.isReady) {
       res.send(`
         <!DOCTYPE html>
         <html>
         <head>
-          <title>WhatsApp QR Code</title>
+          <title>WhatsApp - Connected</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              text-align: center; 
+              padding: 50px;
+              background-color: #f5f5f5;
+            }
+            .container {
+              background: white;
+              padding: 30px;
+              border-radius: 10px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              display: inline-block;
+              max-width: 600px;
+            }
+            .connected { 
+              background-color: #d4edda; 
+              color: #155724; 
+              padding: 20px;
+              border-radius: 5px;
+              margin: 20px 0;
+              font-weight: bold;
+              font-size: 18px;
+            }
+            .info {
+              background-color: #f8f9fa;
+              padding: 15px;
+              border-radius: 5px;
+              margin: 20px 0;
+              text-align: left;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🔗 WhatsApp SuperChat Bridge</h1>
+            <div class="connected">✅ WhatsApp is connected and ready!</div>
+            
+            <div class="info">
+              <h3>Connection Status:</h3>
+              <ul>
+                <li><strong>Status:</strong> Connected & Persistent</li>
+                <li><strong>Business Account:</strong> +4917674729899</li>
+                <li><strong>Target Group:</strong> Weboat++</li>
+                <li><strong>Last Connected:</strong> ${connectionInfo.lastConnected || 'Just now'}</li>
+                <li><strong>Server Uptime:</strong> ${Math.floor(connectionInfo.uptime / 60)} minutes</li>
+                <li><strong>Session Saved:</strong> ${connectionInfo.hasSession ? 'Yes' : 'No'}</li>
+              </ul>
+            </div>
+            
+            <div class="info">
+              <h3>✅ Your SuperChat automation is working!</h3>
+              <p>Messages will be automatically forwarded to your WhatsApp group.</p>
+              <p>The connection is persistent and will survive server restarts.</p>
+            </div>
+            
+            <button onclick="window.location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #25D366; color: white; border: none; border-radius: 5px;">
+              🔄 Refresh Status
+            </button>
+          </div>
+        </body>
+        </html>
+      `);
+    } else if (qrCode) {
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>WhatsApp QR Code - Scan Once</title>
           <style>
             body { 
               font-family: Arial, sans-serif; 
@@ -146,7 +214,6 @@ app.get('/qr', async (req, res) => {
               margin: 20px 0;
               font-weight: bold;
             }
-            .connected { background-color: #d4edda; color: #155724; }
             .waiting { background-color: #fff3cd; color: #856404; }
             img { 
               max-width: 300px; 
@@ -161,96 +228,50 @@ app.get('/qr', async (req, res) => {
               padding: 15px;
               border-radius: 5px;
             }
-            .refresh-btn {
-              background-color: #25D366;
-              color: white;
-              border: none;
-              padding: 10px 20px;
+            .important {
+              background-color: #d1ecf1;
+              color: #0c5460;
+              padding: 15px;
               border-radius: 5px;
-              cursor: pointer;
-              margin-top: 15px;
+              margin: 20px 0;
             }
           </style>
         </head>
         <body>
           <div class="container">
-            <h1>🔗 WhatsApp Connection</h1>
-            ${isConnected ? 
-              '<div class="status connected">✅ WhatsApp is connected and ready!</div>' :
-              '<div class="status waiting">⏳ Waiting for WhatsApp scan...</div>'
-            }
+            <h1>🔗 One-Time WhatsApp Setup</h1>
+            <div class="status waiting">⏳ Scan QR code for persistent connection</div>
             
-            ${qrCode && !isConnected ? 
-              `<img src="${qrCode}" alt="WhatsApp QR Code" />
-               <div class="instructions">
-                 <h3>How to connect:</h3>
-                 <ol>
-                   <li>Open WhatsApp on your phone</li>
-                   <li>Go to Settings → Linked Devices</li>
-                   <li>Tap "Link a Device"</li>
-                   <li>Scan the QR code above</li>
-                 </ol>
-               </div>` :
-              ''
-            }
+            <img src="${qrCode}" alt="WhatsApp QR Code" />
             
-            <br/>
-            <button class="refresh-btn" onclick="window.location.reload()">🔄 Refresh Page</button>
+            <div class="important">
+              <h3>🎯 Important: This is a ONE-TIME setup!</h3>
+              <p>After scanning, your WhatsApp will stay connected for months, even after server restarts.</p>
+              <p>You won't need to scan again unless you manually disconnect.</p>
+            </div>
+            
+            <div class="instructions">
+              <h3>How to connect:</h3>
+              <ol>
+                <li>Open WhatsApp on your phone</li>
+                <li>Go to Settings → Linked Devices</li>
+                <li>Tap "Link a Device"</li>
+                <li>Scan the QR code above</li>
+                <li>✅ Done! Connection will be persistent</li>
+              </ol>
+            </div>
             
             <div style="margin-top: 30px; font-size: 12px; color: #666;">
               <p>Business Account: +4917674729899</p>
               <p>Target Group: Weboat++</p>
+              <p>Session will be saved and restored automatically</p>
             </div>
           </div>
           
           <script>
-            // Auto-refresh every 10 seconds if not connected
-            ${!isConnected ? 'setTimeout(() => window.location.reload(), 10000);' : ''}
+            // Auto-refresh every 10 seconds to check connection
+            setTimeout(() => window.location.reload(), 10000);
           </script>
-        </body>
-        </html>
-      `);
-    } else if (isConnected) {
-      res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>WhatsApp Connected</title>
-          <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              text-align: center; 
-              padding: 50px;
-              background-color: #f5f5f5;
-            }
-            .container {
-              background: white;
-              padding: 30px;
-              border-radius: 10px;
-              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-              display: inline-block;
-            }
-            .connected { 
-              background-color: #d4edda; 
-              color: #155724; 
-              padding: 20px;
-              border-radius: 5px;
-              margin: 20px 0;
-              font-weight: bold;
-              font-size: 18px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>🔗 WhatsApp Connection</h1>
-            <div class="connected">✅ WhatsApp is connected and ready!</div>
-            <p>Your WhatsApp SuperChat bridge is working properly.</p>
-            <div style="margin-top: 30px; font-size: 12px; color: #666;">
-              <p>Business Account: +4917674729899</p>
-              <p>Target Group: Weboat++</p>
-            </div>
-          </div>
         </body>
         </html>
       `);
@@ -259,7 +280,7 @@ app.get('/qr', async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-          <title>WhatsApp QR Code</title>
+          <title>WhatsApp Connection</title>
           <style>
             body { 
               font-family: Arial, sans-serif; 
@@ -286,10 +307,10 @@ app.get('/qr', async (req, res) => {
         <body>
           <div class="container">
             <h1>🔗 WhatsApp Connection</h1>
-            <div class="waiting">⏳ Generating QR code...</div>
-            <p>Please wait while the QR code is being generated.</p>
+            <div class="waiting">⏳ Initializing persistent connection...</div>
+            <p>Please wait while the system starts up.</p>
             <button onclick="window.location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #25D366; color: white; border: none; border-radius: 5px;">
-              🔄 Refresh Page
+              🔄 Check Again
             </button>
           </div>
           <script>
@@ -305,7 +326,7 @@ app.get('/qr', async (req, res) => {
       <html>
         <body style="font-family: Arial; text-align: center; padding: 50px;">
           <h1>❌ Error</h1>
-          <p>Failed to get QR code: ${error.message}</p>
+          <p>Failed to get connection status: ${error.message}</p>
           <button onclick="window.location.reload()">Try Again</button>
         </body>
       </html>
@@ -316,19 +337,12 @@ app.get('/qr', async (req, res) => {
 // Test message endpoint
 app.post('/test-send', async (req, res) => {
   try {
-    if (!whatsappService.isClientReady()) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "WhatsApp client is not ready. Please scan QR code first at /qr" 
-      });
-    }
-
     await whatsappService.sendTestMessage();
     
     // Create a test message record
     const testMessage = addMessage({
       senderName: "System Test",
-      content: "Testing connection to Weboat++ group",
+      content: "Testing persistent connection to Weboat++ group",
       conversationId: "test_conversation_123",
       superchatUrl: "https://app.superchat.com/inbox/test_conversation_123"
     });
@@ -350,44 +364,60 @@ app.post('/test-send', async (req, res) => {
   }
 });
 
-// Get messages endpoint (for monitoring)
+// Enhanced status endpoint
+app.get('/status', async (req, res) => {
+  try {
+    const connectionInfo = await whatsappService.getConnectionInfo();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const messagesCount = messages.filter(msg => msg.timestamp >= today).length;
+    
+    res.json({
+      whatsapp: {
+        isConnected: connectionInfo.isReady,
+        status: connectionInfo.isReady ? 'Connected (Persistent)' : 'Disconnected',
+        lastConnected: connectionInfo.lastConnected,
+        hasSession: connectionInfo.hasSession,
+        uptime: Math.floor(connectionInfo.uptime / 60) + ' minutes'
+      },
+      messagesCount,
+      webhook: {
+        isActive: true,
+        endpoint: "/superchat"
+      },
+      group: {
+        name: "Weboat++",
+        status: connectionInfo.isReady ? "Connected" : "Disconnected"
+      },
+      businessAccount: "+4917674729899",
+      persistence: {
+        enabled: true,
+        sessionSaved: connectionInfo.hasSession,
+        autoReconnect: true
+      }
+    });
+  } catch (error) {
+    console.error('Get status error:', error);
+    res.status(500).json({ error: "Failed to get status" });
+  }
+});
+
+// Get messages endpoint
 app.get('/messages', (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const recentMessages = messages.slice(0, limit);
   res.json(recentMessages);
 });
 
-// Status endpoint
-app.get('/status', (req, res) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const messagesCount = messages.filter(msg => msg.timestamp >= today).length;
+// Enhanced root endpoint
+app.get('/', async (req, res) => {
+  const connectionInfo = await whatsappService.getConnectionInfo();
   
-  res.json({
-    whatsapp: {
-      isConnected: whatsappService.isClientReady(),
-      status: whatsappService.isClientReady() ? 'Connected' : 'Disconnected'
-    },
-    messagesCount,
-    webhook: {
-      isActive: true,
-      endpoint: "/superchat"
-    },
-    group: {
-      name: "Weboat++",
-      status: whatsappService.isClientReady() ? "Connected" : "Disconnected"
-    },
-    businessAccount: "+4917674729899"
-  });
-});
-
-// Root endpoint with basic info
-app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>WhatsApp SuperChat Bridge</title>
+      <title>WhatsApp SuperChat Bridge - Persistent</title>
       <style>
         body { 
           font-family: Arial, sans-serif; 
@@ -417,22 +447,39 @@ app.get('/', (req, res) => {
         }
         .connected { background-color: #d4edda; color: #155724; }
         .disconnected { background-color: #f8d7da; color: #721c24; }
+        .feature {
+          background-color: #d1ecf1;
+          color: #0c5460;
+          padding: 10px;
+          margin: 10px 0;
+          border-radius: 5px;
+        }
       </style>
     </head>
     <body>
       <div class="container">
-        <h1>📱 WhatsApp SuperChat Bridge</h1>
-        <p>Server is running and ready to forward SuperChat messages to WhatsApp group.</p>
+        <h1>📱 WhatsApp SuperChat Bridge - Persistent Connection</h1>
+        <p>Server running with persistent WhatsApp sessions that survive restarts.</p>
         
-        <div class="status ${whatsappService.isClientReady() ? 'connected' : 'disconnected'}">
-          WhatsApp Status: ${whatsappService.isClientReady() ? '✅ Connected' : '❌ Disconnected'}
+        <div class="status ${connectionInfo.isReady ? 'connected' : 'disconnected'}">
+          WhatsApp Status: ${connectionInfo.isReady ? '✅ Connected (Persistent)' : '❌ Disconnected'}
+        </div>
+        
+        <div class="feature">
+          <h3>🎯 Persistent Features:</h3>
+          <ul>
+            <li>✅ Sessions survive server restarts</li>
+            <li>✅ Auto-reconnection every 5 minutes</li>
+            <li>✅ One-time QR scan setup</li>
+            <li>✅ Works for months without intervention</li>
+          </ul>
         </div>
         
         <h3>📋 Available Endpoints:</h3>
         <div class="endpoint">POST /superchat - SuperChat webhook endpoint</div>
-        <div class="endpoint">GET /qr - WhatsApp QR code for authentication</div>
+        <div class="endpoint">GET /qr - WhatsApp QR code for one-time setup</div>
         <div class="endpoint">POST /test-send - Send test message to WhatsApp group</div>
-        <div class="endpoint">GET /status - System status</div>
+        <div class="endpoint">GET /status - Enhanced system status</div>
         <div class="endpoint">GET /messages - Recent messages</div>
         
         <h3>⚙️ Configuration:</h3>
@@ -440,6 +487,8 @@ app.get('/', (req, res) => {
           <li><strong>Business Account:</strong> +4917674729899</li>
           <li><strong>Target Group:</strong> Weboat++</li>
           <li><strong>SuperChat Webhook:</strong> ${req.protocol}://${req.get('host')}/superchat</li>
+          <li><strong>Session Persistence:</strong> ${connectionInfo.hasSession ? 'Enabled' : 'Not Set'}</li>
+          <li><strong>Server Uptime:</strong> ${Math.floor(connectionInfo.uptime / 60)} minutes</li>
         </ul>
         
         <h3>📝 SuperChat Webhook Format:</h3>
@@ -455,7 +504,7 @@ app.get('/', (req, res) => {
         
         <div style="margin-top: 30px; text-align: center;">
           <a href="/qr" style="background: #25D366; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-            🔗 Connect WhatsApp
+            🔗 ${connectionInfo.isReady ? 'View Connection Status' : 'Set Up WhatsApp Connection'}
           </a>
         </div>
       </div>
@@ -486,10 +535,11 @@ process.on('SIGINT', async () => {
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 WhatsApp SuperChat Bridge server running on port ${PORT}`);
-  console.log(`📱 Visit /qr to connect your WhatsApp`);
+  console.log(`🚀 Persistent WhatsApp SuperChat Bridge running on port ${PORT}`);
+  console.log(`📱 Visit /qr for one-time WhatsApp setup`);
   console.log(`🔗 SuperChat webhook URL: /superchat`);
   console.log(`🧪 Test endpoint: /test-send`);
+  console.log(`✨ Persistent sessions enabled - works for months!`);
 });
 
 module.exports = app;
