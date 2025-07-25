@@ -1,23 +1,39 @@
 {
-  "name": "whatsapp-superchat-server",
-  "version": "1.0.0",
-  "description": "WhatsApp SuperChat Bridge Server",
-  "main": "server.js",
-
+  "name": "whatsapp-superchat-bridge-persistent",
+  "version": "2.0.0",
+  "description": "Persistent WhatsApp SuperChat Bridge that survives server restarts for months",
+  "main": "persistent-server.js",
   "scripts": {
-    "start": "node server.js",
-    "build": "echo 'No build step required'",
-    "dev": "node server.js",
-    "test-send": "node test-send.js"
+    "start": "node persistent-server.js",
+    "dev": "node persistent-server.js",
+    "test": "node -e \"console.log('Persistent WhatsApp SuperChat Bridge Ready')\"",
+    "deploy": "echo 'Ready for deployment to cloud hosting'"
   },
+  "keywords": [
+    "whatsapp",
+    "superchat",
+    "webhook",
+    "automation",
+    "persistent",
+    "business"
+  ],
+  "author": "WhatsApp SuperChat Bridge",
+  "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
     "whatsapp-web.js": "^1.23.0",
-    "qrcode": "^1.5.3"
+    "qrcode": "^1.5.3",
+    "puppeteer": "^21.5.2"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=16.0.0"
   },
-  "author": "Rodney",
-  "license": "MIT"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/whatsapp-superchat-bridge"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/whatsapp-superchat-bridge/issues"
+  },
+  "homepage": "https://github.com/yourusername/whatsapp-superchat-bridge#readme"
 }
