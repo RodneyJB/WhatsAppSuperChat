@@ -1,289 +1,495 @@
 import express from 'express';
-import { initializeWhatsApp, sendToGroup, isSocketOpen, getCurrentQRCode, connectionStatus } from './whatsapp.js';
+import WhatsAppService from './whatsapp.js';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 
+// Middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-let whatsappSock = null;
-let isInitializing = false;
+// Initialize WhatsApp service
+const whatsappService = new WhatsAppService();
 
-async function startServer() {
-    if (isInitializing) return;
-    isInitializing = true;
-    
-    console.log('🔄 Starting persistent WhatsApp connection manager...');
-    
-    const attemptConnection = async () => {
-        try {
-            if (!whatsappSock || !isSocketOpen(whatsappSock)) {
-                console.log('🟡 Attempting WhatsApp connection...');
-                whatsappSock = await initializeWhatsApp();
-                console.log('✅ WhatsApp connection established');
-                return true;
-            }
-            return true;
-        } catch (error) {
-            console.error('❌ Connection attempt failed:', error.message);
-            return false;
-        }
-    };
-    
-    // Initial connection attempt
-    await attemptConnection();
-    
-    // Monitor and auto-reconnect every 5 minutes for months-long reliability
-    setInterval(async () => {
-        if (!isSocketOpen(whatsappSock)) {
-            console.log('💔 Connection lost - attempting reconnection...');
-            const success = await attemptConnection();
-            if (!success) {
-                console.log('🔄 Will retry in next interval...');
-            }
-        } else {
-            console.log('💓 Connection healthy');
-        }
-    }, 300000); // 5 minutes
-    
-    isInitializing = false;
-}
+// Global message storage (in production, use a database)
+const messages = [];
+let messageCounter = 0;
 
-// SuperChat webhook endpoint with comprehensive payload handling
+// Helper function to add message to storage
+const addMessage = (messageData) => {
+  const message = {
+    id: Date.now().toString(),
+    ...messageData,
+    timestamp: new Date(),
+    status: 'pending'
+  };
+  messages.unshift(message);
+  messageCounter++;
+  return message;
+};
+
+// Helper function to update message status
+const updateMessageStatus = (id, status) => {
+  const message = messages.find(msg => msg.id === id);
+  if (message) {
+    message.status = status;
+  }
+  return message;
+};
+
+// Initialize WhatsApp service
+console.log('Initializing WhatsApp service...');
+whatsappService.initialize().catch(error => {
+  console.error('Failed to initialize WhatsApp service:', error);
+});
+
+// Routes
+
+// SuperChat webhook endpoint
 app.post('/superchat', async (req, res) => {
-    try {
-        console.log('🔔 Received SuperChat webhook:', JSON.stringify(req.body, null, 2));
-        console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
-
-        const webhookData = req.body;
-        let formattedMessage = '';
-
-        // Handle different SuperChat webhook formats
-        if (webhookData.message) {
-            // SuperChat automation format: { "message": { "sender": { "name": "..." }, "content": { "text": "..." }, ... } }
-            const senderName = webhookData?.message?.sender?.name || 'Unknown Sender';
-            const messageText = webhookData?.message?.content?.text || 'No message content';
-            const attachments = webhookData?.message?.attachments || [];
-            const conversationId = webhookData?.message?.conversation?.id || 'unknown';
-
-            formattedMessage = `📩 New SuperChat message!\n👤 ${senderName}\n💬 "${messageText}"`;
-
-            if (attachments.length > 0) {
-                const fileInfo = attachments.map(att => {
-                    if (typeof att === 'string') return att;
-                    if (att.url) return att.url;
-                    if (att.name) return att.name;
-                    return 'Unknown file';
-                }).join(', ');
-                formattedMessage += `\n📎 Files: ${fileInfo}`;
-            }
-
-            formattedMessage += `\n🔗 https://app.superchat.com/inbox/${conversationId}\n⚠️ Reply in SuperChat only.`;
-        } 
-        else if (webhookData.type === 'superchat' || webhookData.amount) {
-            // SuperChat donation format
-            const amount = webhookData.amount || 'Unknown';
-            const currency = webhookData.currency || '';
-            const authorName = webhookData.author?.name || webhookData.sender?.name || 'Anonymous';
-            const messageText = webhookData.message || webhookData.text || '';
-            
-            formattedMessage = `💰 SuperChat Donation: ${authorName} - ${amount}${currency}\n💬 "${messageText}"`;
-        }
-        else {
-            // Fallback - log everything and create basic message
-            console.log('🔍 Unknown webhook format - using fallback parser');
-            const possibleSender = webhookData.sender?.name || 
-                                  webhookData.author?.name || 
-                                  webhookData.user?.name || 
-                                  'Unknown Sender';
-            const possibleMessage = webhookData.message || 
-                                   webhookData.text || 
-                                   webhookData.content ||
-                                   JSON.stringify(webhookData);
-            
-            formattedMessage = `📝 SuperChat Notification\n👤 ${possibleSender}\n💬 ${possibleMessage}`;
-        }
-
-        console.log('📤 Formatted message for WhatsApp:', formattedMessage);
-
-        // Reconnect if socket is dead
-        if (!isSocketOpen(whatsappSock)) {
-            console.warn('⚠️ WhatsApp socket closed — reinitializing...');
-            whatsappSock = await initializeWhatsApp();
-        }
-
-        const result = await sendToGroup(whatsappSock, 'Weboat++', formattedMessage);
-        if (result.success) {
-            console.log('✅ Message sent to WhatsApp successfully');
-            res.status(200).json({ status: 'success', message: 'Message forwarded to WhatsApp' });
-        } else {
-            console.error('❌ Failed to send message:', result.error);
-            res.status(500).json({ status: 'error', message: 'Failed to send message', error: result.error });
-        }
-
-    } catch (error) {
-        console.error('❌ Error processing webhook:', error);
-        res.status(500).json({ status: 'error', message: 'Internal server error', error: error.message });
-    }
-});
-
-// QR Code endpoint for authentication (text only)
-app.get('/qr', async (req, res) => {
-    try {
-        const qrCode = getCurrentQRCode();
-        
-        if (qrCode) {
-            res.status(200).json({
-                qr: qrCode,
-                message: 'QR code available for scanning',
-                expires: '30 seconds',
-                instructions: 'Copy this text, generate QR code image, and scan with WhatsApp'
-            });
-        } else {
-            if (isSocketOpen(whatsappSock)) {
-                res.status(200).json({
-                    qr: null,
-                    message: 'WhatsApp already connected',
-                    connected: true
-                });
-            } else {
-                // Try to reinitialize if no QR and not connected
-                console.log('No QR available, attempting to reinitialize WhatsApp...');
-                try {
-                    whatsappSock = await initializeWhatsApp();
-                    const newQrCode = getCurrentQRCode();
-                    if (newQrCode) {
-                        res.status(200).json({
-                            qr: newQrCode,
-                            message: 'QR code generated after reinitializing',
-                            expires: '30 seconds'
-                        });
-                    } else {
-                        res.status(202).json({
-                            qr: null,
-                            message: 'WhatsApp initializing. Please try again in a few seconds.',
-                            connected: false
-                        });
-                    }
-                } catch (initError) {
-                    console.error('Failed to reinitialize WhatsApp:', initError);
-                    res.status(500).json({
-                        qr: null,
-                        message: 'Failed to initialize WhatsApp connection',
-                        error: initError.message
-                    });
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error getting QR code:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to get QR code',
-            error: error.message
-        });
-    }
-});
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.status(200).json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        whatsappConnected: isSocketOpen(whatsappSock),
-        connectionStatus,
-        hasQR: getCurrentQRCode() !== null,
-        uptime: process.uptime()
-    });
-});
-
-// Test endpoint to send a message and debug groups
-app.get('/test-send', async (req, res) => {
-    try {
-        console.log('🧪 Test endpoint called');
-        
-        if (!whatsappSock || !isSocketOpen(whatsappSock)) {
-            console.log('⚠️ WhatsApp socket not available, attempting to reconnect...');
-            whatsappSock = await initializeWhatsApp();
-        }
-        
-        const testMessage = '🧪 Test message from /test-send endpoint - ' + new Date().toISOString();
-        const result = await sendToGroup(whatsappSock, 'Weboat++', testMessage);
-        
-        res.status(200).json({
-            status: 'test_completed',
-            message: testMessage,
-            result: result,
-            timestamp: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('❌ Test endpoint error:', error);
-        res.status(500).json({
-            status: 'error',
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
-});
-
-// Debug endpoint to capture webhook data (accepts any method)
-app.all('/debug-webhook', (req, res) => {
-    console.log('🔍 DEBUG WEBHOOK CAPTURED:');
-    console.log('📋 Method:', req.method);
-    console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
-    console.log('📋 Query:', JSON.stringify(req.query, null, 2));
-    console.log('📋 Body:', JSON.stringify(req.body, null, 2));
-    console.log('📋 Raw URL:', req.url);
-    console.log('📋 Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
-    console.log('==========================================');
+  try {
+    console.log('Received SuperChat webhook:', JSON.stringify(req.body, null, 2));
     
-    res.status(200).json({
-        status: 'captured',
-        method: req.method,
-        headers: req.headers,
-        query: req.query,
-        body: req.body,
-        timestamp: new Date().toISOString(),
-        message: 'Webhook data captured in server logs'
+    // Validate webhook payload
+    if (!req.body.message || !req.body.message.sender || !req.body.message.content) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid webhook payload' 
+      });
+    }
+
+    const { message } = req.body;
+    const senderName = message.sender.name;
+    const content = message.content.text;
+    const conversationId = message.conversation?.id || 'unknown';
+    const attachmentUrl = message.attachments && message.attachments.length > 0 ? message.attachments[0] : undefined;
+    
+    // Create message record
+    const messageRecord = addMessage({
+      senderName,
+      content,
+      conversationId,
+      attachmentUrl,
+      superchatUrl: `https://app.superchat.com/inbox/${conversationId}`
     });
+
+    try {
+      // Send to WhatsApp group
+      await whatsappService.sendSuperchatMessage(
+        senderName,
+        content,
+        conversationId,
+        attachmentUrl
+      );
+
+      // Update message status to delivered
+      updateMessageStatus(messageRecord.id, 'delivered');
+      
+      console.log('✅ Message forwarded to WhatsApp group successfully');
+      res.json({ 
+        success: true, 
+        message: "Message forwarded to WhatsApp group successfully",
+        messageId: messageRecord.id
+      });
+    } catch (whatsappError) {
+      console.error('❌ WhatsApp sending failed:', whatsappError);
+      
+      // Update message status to failed
+      updateMessageStatus(messageRecord.id, 'failed');
+      
+      res.status(500).json({ 
+        success: false, 
+        error: "Failed to send message to WhatsApp group",
+        details: whatsappError.message,
+        messageId: messageRecord.id
+      });
+    }
+  } catch (error) {
+    console.error('SuperChat webhook error:', error);
+    res.status(400).json({ 
+      success: false, 
+      error: "Invalid webhook payload" 
+    });
+  }
 });
 
-// Root endpoint
+// QR Code endpoint
+app.get('/qr', async (req, res) => {
+  try {
+    const qrCode = await whatsappService.getQRCode();
+    const isConnected = whatsappService.isClientReady();
+    
+    if (qrCode) {
+      // Return HTML page with QR code
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>WhatsApp QR Code</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              text-align: center; 
+              padding: 50px;
+              background-color: #f5f5f5;
+            }
+            .container {
+              background: white;
+              padding: 30px;
+              border-radius: 10px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              display: inline-block;
+            }
+            .status {
+              padding: 10px;
+              border-radius: 5px;
+              margin: 20px 0;
+              font-weight: bold;
+            }
+            .connected { background-color: #d4edda; color: #155724; }
+            .waiting { background-color: #fff3cd; color: #856404; }
+            img { 
+              max-width: 300px; 
+              height: auto; 
+              border: 2px solid #ddd;
+              border-radius: 5px;
+            }
+            .instructions {
+              margin-top: 20px;
+              text-align: left;
+              background-color: #f8f9fa;
+              padding: 15px;
+              border-radius: 5px;
+            }
+            .refresh-btn {
+              background-color: #25D366;
+              color: white;
+              border: none;
+              padding: 10px 20px;
+              border-radius: 5px;
+              cursor: pointer;
+              margin-top: 15px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🔗 WhatsApp Connection</h1>
+            ${isConnected ? 
+              '<div class="status connected">✅ WhatsApp is connected and ready!</div>' :
+              '<div class="status waiting">⏳ Waiting for WhatsApp scan...</div>'
+            }
+            
+            ${qrCode && !isConnected ? 
+              `<img src="${qrCode}" alt="WhatsApp QR Code" />
+               <div class="instructions">
+                 <h3>How to connect:</h3>
+                 <ol>
+                   <li>Open WhatsApp on your phone</li>
+                   <li>Go to Settings → Linked Devices</li>
+                   <li>Tap "Link a Device"</li>
+                   <li>Scan the QR code above</li>
+                 </ol>
+               </div>` :
+              ''
+            }
+            
+            <br/>
+            <button class="refresh-btn" onclick="window.location.reload()">🔄 Refresh Page</button>
+            
+            <div style="margin-top: 30px; font-size: 12px; color: #666;">
+              <p>Business Account: +4917674729899</p>
+              <p>Target Group: Weboat++</p>
+            </div>
+          </div>
+          
+          <script>
+            // Auto-refresh every 10 seconds if not connected
+            ${!isConnected ? 'setTimeout(() => window.location.reload(), 10000);' : ''}
+          </script>
+        </body>
+        </html>
+      `);
+    } else if (isConnected) {
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>WhatsApp Connected</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              text-align: center; 
+              padding: 50px;
+              background-color: #f5f5f5;
+            }
+            .container {
+              background: white;
+              padding: 30px;
+              border-radius: 10px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              display: inline-block;
+            }
+            .connected { 
+              background-color: #d4edda; 
+              color: #155724; 
+              padding: 20px;
+              border-radius: 5px;
+              margin: 20px 0;
+              font-weight: bold;
+              font-size: 18px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🔗 WhatsApp Connection</h1>
+            <div class="connected">✅ WhatsApp is connected and ready!</div>
+            <p>Your WhatsApp SuperChat bridge is working properly.</p>
+            <div style="margin-top: 30px; font-size: 12px; color: #666;">
+              <p>Business Account: +4917674729899</p>
+              <p>Target Group: Weboat++</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
+    } else {
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>WhatsApp QR Code</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              text-align: center; 
+              padding: 50px;
+              background-color: #f5f5f5;
+            }
+            .container {
+              background: white;
+              padding: 30px;
+              border-radius: 10px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              display: inline-block;
+            }
+            .waiting { 
+              background-color: #fff3cd; 
+              color: #856404; 
+              padding: 15px;
+              border-radius: 5px;
+              margin: 20px 0;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🔗 WhatsApp Connection</h1>
+            <div class="waiting">⏳ Generating QR code...</div>
+            <p>Please wait while the QR code is being generated.</p>
+            <button onclick="window.location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #25D366; color: white; border: none; border-radius: 5px;">
+              🔄 Refresh Page
+            </button>
+          </div>
+          <script>
+            setTimeout(() => window.location.reload(), 5000);
+          </script>
+        </body>
+        </html>
+      `);
+    }
+  } catch (error) {
+    console.error('QR code error:', error);
+    res.status(500).send(`
+      <html>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <h1>❌ Error</h1>
+          <p>Failed to get QR code: ${error.message}</p>
+          <button onclick="window.location.reload()">Try Again</button>
+        </body>
+      </html>
+    `);
+  }
+});
+
+// Test message endpoint
+app.post('/test-send', async (req, res) => {
+  try {
+    if (!whatsappService.isClientReady()) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "WhatsApp client is not ready. Please scan QR code first at /qr" 
+      });
+    }
+
+    await whatsappService.sendTestMessage();
+    
+    // Create a test message record
+    const testMessage = addMessage({
+      senderName: "System Test",
+      content: "Testing connection to Weboat++ group",
+      conversationId: "test_conversation_123",
+      superchatUrl: "https://app.superchat.com/inbox/test_conversation_123"
+    });
+
+    updateMessageStatus(testMessage.id, 'delivered');
+
+    console.log('✅ Test message sent successfully');
+    res.json({ 
+      success: true, 
+      message: "Test message sent to WhatsApp group successfully" 
+    });
+  } catch (error) {
+    console.error('❌ Test message error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to send test message",
+      details: error.message
+    });
+  }
+});
+
+// Get messages endpoint (for monitoring)
+app.get('/messages', (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  const recentMessages = messages.slice(0, limit);
+  res.json(recentMessages);
+});
+
+// Status endpoint
+app.get('/status', (req, res) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const messagesCount = messages.filter(msg => msg.timestamp >= today).length;
+  
+  res.json({
+    whatsapp: {
+      isConnected: whatsappService.isClientReady(),
+      status: whatsappService.isClientReady() ? 'Connected' : 'Disconnected'
+    },
+    messagesCount,
+    webhook: {
+      isActive: true,
+      endpoint: "/superchat"
+    },
+    group: {
+      name: "Weboat++",
+      status: whatsappService.isClientReady() ? "Connected" : "Disconnected"
+    },
+    businessAccount: "+4917674729899"
+  });
+});
+
+// Root endpoint with basic info
 app.get('/', (req, res) => {
-    const isConnected = whatsappSock && isSocketOpen(whatsappSock);
-    res.status(200).json({
-        message: 'SuperChat to WhatsApp Bridge',
-        status: isConnected ? 'connected' : 'reconnecting',
-        endpoints: {
-            webhook: 'POST /superchat',
-            qr: 'GET /qr (text format)',
-            health: 'GET /health',
-            test: 'GET /test-send (send test message)',
-            debug: 'ALL /debug-webhook (capture data)'
-        },
-        instructions: isConnected ? 
-            'Service ready - point SuperChat webhook to /superchat endpoint' :
-            'WhatsApp reconnecting - scan QR code at /qr endpoint if needed'
-    });
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>WhatsApp SuperChat Bridge</title>
+      <style>
+        body { 
+          font-family: Arial, sans-serif; 
+          max-width: 800px; 
+          margin: 0 auto; 
+          padding: 20px;
+          background-color: #f5f5f5;
+        }
+        .container {
+          background: white;
+          padding: 30px;
+          border-radius: 10px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .endpoint {
+          background-color: #f8f9fa;
+          padding: 10px;
+          margin: 10px 0;
+          border-radius: 5px;
+          font-family: monospace;
+        }
+        .status {
+          padding: 10px;
+          border-radius: 5px;
+          margin: 10px 0;
+          font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>📱 WhatsApp SuperChat Bridge</h1>
+        <p>Server is running and ready to forward SuperChat messages to WhatsApp group.</p>
+        
+        <div class="status ${whatsappService.isClientReady() ? 'connected' : 'disconnected'}">
+          WhatsApp Status: ${whatsappService.isClientReady() ? '✅ Connected' : '❌ Disconnected'}
+        </div>
+        
+        <h3>📋 Available Endpoints:</h3>
+        <div class="endpoint">POST /superchat - SuperChat webhook endpoint</div>
+        <div class="endpoint">GET /qr - WhatsApp QR code for authentication</div>
+        <div class="endpoint">POST /test-send - Send test message to WhatsApp group</div>
+        <div class="endpoint">GET /status - System status</div>
+        <div class="endpoint">GET /messages - Recent messages</div>
+        
+        <h3>⚙️ Configuration:</h3>
+        <ul>
+          <li><strong>Business Account:</strong> +4917674729899</li>
+          <li><strong>Target Group:</strong> Weboat++</li>
+          <li><strong>SuperChat Webhook:</strong> ${req.protocol}://${req.get('host')}/superchat</li>
+        </ul>
+        
+        <h3>📝 SuperChat Webhook Format:</h3>
+        <pre style="background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto;">
+{
+  "message": {
+    "sender": { "name": "{{contact.fullName}}" },
+    "content": { "text": "{{message.text}}" },
+    "attachments": [ "{{message.media.url}}" ],
+    "conversation": { "id": "{{conversation.id}}" }
+  }
+}</pre>
+        
+        <div style="margin-top: 30px; text-align: center;">
+          <a href="/qr" style="background: #25D366; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+            🔗 Connect WhatsApp
+          </a>
+        </div>
+      </div>
+    </body>
+    </html>
+  `);
 });
 
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('Unhandled error:', error);
+  res.status(500).json({ 
+    success: false, 
+    error: 'Internal server error' 
+  });
+});
+
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Shutting down WhatsApp service...');
+  try {
+    await whatsappService.destroy();
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+  }
+  process.exit(0);
+});
+
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Webhook endpoint: http://0.0.0.0:${PORT}/superchat`);
-    console.log(`QR code endpoint: http://0.0.0.0:${PORT}/qr`);
-    console.log(`Health check: http://0.0.0.0:${PORT}/health`);
-    startServer();
+  console.log(`🚀 WhatsApp SuperChat Bridge server running on port ${PORT}`);
+  console.log(`📱 Visit /qr to connect your WhatsApp`);
+  console.log(`🔗 SuperChat webhook URL: /superchat`);
+  console.log(`🧪 Test endpoint: /test-send`);
 });
 
-process.on('SIGINT', () => {
-    console.log('Shutting down server...');
-    if (whatsappSock?.end) whatsappSock.end();
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    console.log('Shutting down server...');
-    if (whatsappSock?.end) whatsappSock.end();
-    process.exit(0);
-});
+export default app;

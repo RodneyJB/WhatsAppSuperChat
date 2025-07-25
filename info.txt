@@ -1,13 +1,54 @@
+
+
+
+
+
+
+
+
+This is the task, 
+
+File to use, already in github and auto load to render.
+Z:\BP WEB\WhatsAppServer\whatsapp.js 
+Z:\BP WEB\WhatsAppServer\test-send.js  
+Z:\BP WEB\WhatsAppServer\server.js
+Z:\BP WEB\WhatsAppServer\package.json
+
+Github https://github.com/RodneyJB/WhatsAppSuperChat.git
+Render.com server https://whatsappsuperchat.onrender.com
+
+Superchat automation
+https://whatsappsuperchat.onrender.com/superchat
+{
+  "message": {
+    "sender": { "name": "{{contact.fullName}}" },
+    "content": { "text": "{{message.text}}" },
+    "attachments": [ "{{message.media.url}}" ],
+    "conversation": { "id": "{{conversation.id}}" }
+  }
+}
+
+
+Superchat has an automation that will send new incoming mesages to render,
+Render is to take the masage and send it to a whats app group Weboat++
+my whats app acount number is +4917674729899 
+
+Create this work flow, also provide a way to link devices to my bussines whats app account
+
 https://whatsappsuperchat.onrender.com/qr
 // to get qr code to conect to the whats app channel
 
-
-
 https://whatsappsuperchat.onrender.com/test-send
 // sends a test message to the whats app group
+eg :
+📩 New SuperChat message!
+👤 Rodney
+💬 "Hi Rodney, try 18 - SuperChat test"
+🔗 https://app.superchat.com/inbox/test_conversation_123
+⚠ Reply in SuperChat only.
 
-
-
-Temp
-https://whatsappsuperchat.onrender.com/debug-webhook
-https://whatsappsuperchat.onrender.com/superchat
+note, i only want the server side code, no fucky app, 
+i just want this tak performed, mesage in super chat, 
+send to render send to whats app group, Thats it, 
+Use the files already provided, 
+I will paste it in my vs code and upload to github,
