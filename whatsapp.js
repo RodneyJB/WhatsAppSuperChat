@@ -1,5 +1,5 @@
-import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
-import qrcode from 'qrcode';
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
 
 class WhatsAppService {
   constructor() {
@@ -141,4 +141,4 @@ class WhatsAppService {
   }
 }
 
-export default WhatsAppService;
+module.exports = WhatsAppService;

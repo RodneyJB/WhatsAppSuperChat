@@ -1,5 +1,5 @@
-import express from 'express';
-import WhatsAppService from './whatsapp.js';
+const express = require('express');
+const WhatsAppService = require('./whatsapp.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -492,4 +492,4 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🧪 Test endpoint: /test-send`);
 });
 
-export default app;
+module.exports = app;
